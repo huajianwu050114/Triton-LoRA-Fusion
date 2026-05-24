@@ -21,7 +21,7 @@
 | Implementation | Latency (us) | Accuracy / Match |
 | :--- | :--- | :--- |
 | **PyTorch (cuBLAS)** | 154.10 us | 基准 (Reference) |
-| **Triton Base GEMM** | 154.10 us | ✅ PASSED (atol=1e-2) |
-| **Performance Ratio**| **100.0%** | - |
+| **Triton Base GEMM** | 153.99 us | ✅ PASSED (atol=1e-2) |
+| **Performance Ratio**| **99.6%** | - |
 
 **结论**：Triton 算子算力释放已达物理极限，可作为完美的融合基座接入 LoRA Expand 计算。
