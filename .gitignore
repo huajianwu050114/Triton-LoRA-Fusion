@@ -1,7 +1,18 @@
+# Python
 __pycache__/
-*.pyc
-*.nsys-rep
-*.sqlite
-.DS_Store
+*.py[cod]
+*$py.class
+*.so
+
+# Profiling & Logs
 log/
-traces/
+*.json
+*.trace
+*.pt
+*.pth
+
+# Environment
+.env
+.venv
+env/
+venv/
