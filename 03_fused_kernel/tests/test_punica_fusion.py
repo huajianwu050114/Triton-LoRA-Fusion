@@ -1,6 +1,11 @@
+import sys
+from pathlib import Path
+
 import torch
 import triton
-from fused_punica_base_gemm import fused_sgmv_base_expand_kernel
+
+sys.path.append(str(Path(__file__).resolve().parents[1]))
+from kernels.fused_punica_base_gemm import fused_sgmv_base_expand_kernel
 
 def test_sgmv_fusion():
     M, K_BASE, N, r = 64, 4096, 28672, 8

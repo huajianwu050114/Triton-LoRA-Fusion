@@ -1,5 +1,10 @@
+import sys
+from pathlib import Path
+
 import torch
-from fused_lora_gemm import fused_lora_matmul
+
+sys.path.append(str(Path(__file__).resolve().parents[1]))
+from kernels.fused_lora_gemm import fused_lora_matmul
 
 def test_fusion_performance():
     M, K, N, r = 64, 4096, 28672, 8

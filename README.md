@@ -83,10 +83,15 @@ pip install -r requirements.txt
 │   ├── matmul_kernel.py   # 支持极端长宽比 (64x28672) 的 Triton GEMM
 │   └── test_base_gemm.py  # 精度与 cuBLAS 对齐验证
 ├── 03_fused_kernel/       # 核心融合算子代码库
-│   ├── fused_lora_gemm.py        # 静态形状下的 Epilogue Fusion 算子
-│   ├── fused_punica_base_gemm.py # 支持动态 Segment 路由的 SGMV 融合算子 (Industrial Grade)
-│   ├── test_fused_kernel.py      # 端到端性能对决测试脚本
-│   └── test_punica_fusion.py     # 复杂多 LoRA Batch 路由正确性验证
+│   ├── kernels/                  # Triton kernel 实现
+│   │   ├── fused_lora_gemm.py
+│   │   ├── fused_punica_base_gemm.py
+│   │   └── spatial_down_base.py
+│   ├── tests/                    # 正确性与性能测试脚本
+│   │   ├── test_fused_kernel.py
+│   │   ├── test_punica_fusion.py
+│   │   └── test_spatial_down_base.py
+│   └── docs/                     # Step 3 相关说明文档
 ├── requirements.txt       # 环境依赖
 └── README.md              # 项目主文档
 ```
@@ -102,11 +107,15 @@ python 02_base_gemm/test_base_gemm.py
 ```
 **step3：升维融合性能对比**
 ```bash 
-python 03_fused_kernel/test_fused_kernel.py
+python 03_fused_kernel/tests/test_fused_kernel.py
 ```
-**step3: 验证 Punica SGMV 动态路由功能:**
+**step4: 验证 Punica SGMV 动态路由功能:**
 ```bash 
-python 03_fused_kernel/test_punica_fusion.py
+python 03_fused_kernel/tests/test_punica_fusion.py
+```
+**step5: 验证 Spatial Down+Base 原型:**
+```bash
+python 03_fused_kernel/tests/test_spatial_down_base.py
 ```
 ## Future Work
 后续工作包括将 fused_sgmv_base_expand_kernel 直接集成到 SGLang 的 lora/backend/triton_ops 路径下，以实现系统级、端到端的性能指标提升。
