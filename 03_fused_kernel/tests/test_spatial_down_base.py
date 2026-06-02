@@ -54,6 +54,8 @@ def main():
         ("interleaved_40_10", {"layout": "interleaved", "base_chunk": 40, "down_chunk": 10}),
         ("interleaved_80_20", {"layout": "interleaved", "base_chunk": 80, "down_chunk": 20}),
         ("interleaved_160_40", {"layout": "interleaved", "base_chunk": 160, "down_chunk": 40}),
+        ("three_range_136", {"layout": "three_range", "base_chunk": 136}),
+        ("three_range_160", {"layout": "three_range", "base_chunk": 160}),
     ]
 
     results = []

@@ -31,6 +31,8 @@ def spatial_down_base_kernel(
     BLOCK_K_DOWN: tl.constexpr,
     BLOCK_R_PAD: tl.constexpr,
     INTERLEAVE: tl.constexpr,
+    THREE_RANGE: tl.constexpr,
+    DOWN_FULL_K: tl.constexpr,
     BASE_CHUNK: tl.constexpr,
     DOWN_CHUNK: tl.constexpr,
 ):
@@ -40,9 +42,26 @@ def spatial_down_base_kernel(
     num_base_n = tl.cdiv(N, BLOCK_N_BASE)
     num_base_tiles = num_base_m * num_base_n
     num_down_m = tl.cdiv(M, BLOCK_M_DOWN)
-    num_down_tiles = num_down_m * tl.cdiv(K, BLOCK_K_DOWN)
+    if DOWN_FULL_K:
+        num_down_tiles = num_down_m
+    else:
+        num_down_tiles = num_down_m * tl.cdiv(K, BLOCK_K_DOWN)
 
-    if INTERLEAVE:
+    if THREE_RANGE:
+        first_base_tiles = tl.minimum(BASE_CHUNK, num_base_tiles)
+        if pid < first_base_tiles:
+            is_base = True
+            base_task = pid
+            down_task = 0
+        elif pid < first_base_tiles + num_down_tiles:
+            is_base = False
+            base_task = 0
+            down_task = pid - first_base_tiles
+        else:
+            is_base = True
+            base_task = first_base_tiles + (pid - first_base_tiles - num_down_tiles)
+            down_task = 0
+    elif INTERLEAVE:
         cycle = BASE_CHUNK + DOWN_CHUNK
         group_id = pid // cycle
         local_id = pid - group_id * cycle
@@ -95,39 +114,72 @@ def spatial_down_base_kernel(
         if down_task >= num_down_tiles:
             return
 
-        pid_m = down_task % num_down_m
-        pid_k = down_task // num_down_m
-
-        down_offs_m = pid_m * BLOCK_M_DOWN + tl.arange(0, BLOCK_M_DOWN)
-        down_offs_k = pid_k * BLOCK_K_DOWN + tl.arange(0, BLOCK_K_DOWN)
         down_offs_r = tl.arange(0, BLOCK_R_PAD)
 
-        down_x_ptrs = x_ptr + down_offs_m[:, None] * stride_xm + down_offs_k[None, :] * stride_xk
-        down_a_ptrs = a_ptr + down_offs_k[:, None] * stride_ak + down_offs_r[None, :] * stride_ar
+        if DOWN_FULL_K:
+            pid_m = down_task
+            down_offs_m = pid_m * BLOCK_M_DOWN + tl.arange(0, BLOCK_M_DOWN)
+            down_offs_k = tl.arange(0, BLOCK_K_DOWN)
 
-        x = tl.load(
-            down_x_ptrs,
-            mask=(down_offs_m[:, None] < M) & (down_offs_k[None, :] < K),
-            other=0.0,
-        )
-        a = tl.load(
-            down_a_ptrs,
-            mask=(down_offs_k[:, None] < K) & (down_offs_r[None, :] < R),
-            other=0.0,
-        )
-        partial = tl.dot(x, a)
+            down_x_ptrs = x_ptr + down_offs_m[:, None] * stride_xm + down_offs_k[None, :] * stride_xk
+            down_a_ptrs = a_ptr + down_offs_k[:, None] * stride_ak + down_offs_r[None, :] * stride_ar
 
-        down_y_ptrs = y_ptr + down_offs_m[:, None] * stride_ym + down_offs_r[None, :] * stride_yr
-        tl.atomic_add(
-            down_y_ptrs,
-            partial,
-            sem="relaxed",
-            mask=(down_offs_m[:, None] < M) & (down_offs_r[None, :] < R),
-        )
+            down_acc = tl.zeros((BLOCK_M_DOWN, BLOCK_R_PAD), dtype=tl.float32)
+            for k0 in range(0, K, BLOCK_K_DOWN):
+                down_k_mask = down_offs_k < K - k0
+                x = tl.load(
+                    down_x_ptrs,
+                    mask=(down_offs_m[:, None] < M) & down_k_mask[None, :],
+                    other=0.0,
+                )
+                a = tl.load(
+                    down_a_ptrs,
+                    mask=down_k_mask[:, None] & (down_offs_r[None, :] < R),
+                    other=0.0,
+                )
+                down_acc += tl.dot(x, a)
+                down_x_ptrs += BLOCK_K_DOWN * stride_xk
+                down_a_ptrs += BLOCK_K_DOWN * stride_ak
+
+            down_y_ptrs = y_ptr + down_offs_m[:, None] * stride_ym + down_offs_r[None, :] * stride_yr
+            tl.store(
+                down_y_ptrs,
+                down_acc,
+                mask=(down_offs_m[:, None] < M) & (down_offs_r[None, :] < R),
+            )
+        else:
+            pid_m = down_task % num_down_m
+            pid_k = down_task // num_down_m
+
+            down_offs_m = pid_m * BLOCK_M_DOWN + tl.arange(0, BLOCK_M_DOWN)
+            down_offs_k = pid_k * BLOCK_K_DOWN + tl.arange(0, BLOCK_K_DOWN)
+
+            down_x_ptrs = x_ptr + down_offs_m[:, None] * stride_xm + down_offs_k[None, :] * stride_xk
+            down_a_ptrs = a_ptr + down_offs_k[:, None] * stride_ak + down_offs_r[None, :] * stride_ar
+
+            x = tl.load(
+                down_x_ptrs,
+                mask=(down_offs_m[:, None] < M) & (down_offs_k[None, :] < K),
+                other=0.0,
+            )
+            a = tl.load(
+                down_a_ptrs,
+                mask=(down_offs_k[:, None] < K) & (down_offs_r[None, :] < R),
+                other=0.0,
+            )
+            partial = tl.dot(x, a)
+
+            down_y_ptrs = y_ptr + down_offs_m[:, None] * stride_ym + down_offs_r[None, :] * stride_yr
+            tl.atomic_add(
+                down_y_ptrs,
+                partial,
+                sem="relaxed",
+                mask=(down_offs_m[:, None] < M) & (down_offs_r[None, :] < R),
+            )
 
 
 def _grid_size(num_base_tiles, num_down_tiles, layout, base_chunk, down_chunk):
-    if layout == "contiguous":
+    if layout in ("contiguous", "three_range"):
         return num_base_tiles + num_down_tiles
     if layout == "interleaved":
         groups = max(triton.cdiv(num_base_tiles, base_chunk), triton.cdiv(num_down_tiles, down_chunk))
@@ -149,14 +201,16 @@ def spatial_down_base_matmul(
     block_m_down=16,
     block_k_down=64,
     block_r_pad=16,
+    down_mode="atomic",
 ):
     """
     Spatial prototype:
     - base tiles compute W = X @ C
-    - down tiles compute partial X @ A over K chunks and atomic-add into Y
+    - down tiles compute X @ A either with K-split atomics or full-K local reduction
 
     layout="contiguous" launches [all base][all down].
     layout="interleaved" launches repeated [base_chunk base][down_chunk down].
+    layout="three_range" launches [base_chunk base][all down][remaining base].
     """
     assert x.is_contiguous() and c.is_contiguous() and a.is_contiguous()
     M, K = x.shape
@@ -165,13 +219,18 @@ def spatial_down_base_matmul(
     assert K == K_c == K_a
     assert block_r_pad >= R
     assert base_chunk > 0 and down_chunk > 0
+    assert down_mode in ("atomic", "full_k")
+    down_full_k = down_mode == "full_k"
 
     w = torch.empty((M, N), device=x.device, dtype=torch.float16)
     y = torch.empty((M, R), device=x.device, dtype=torch.float32)
     y.zero_()
 
     num_base_tiles = triton.cdiv(M, block_m_base) * triton.cdiv(N, block_n_base)
-    num_down_tiles = triton.cdiv(M, block_m_down) * triton.cdiv(K, block_k_down)
+    if down_full_k:
+        num_down_tiles = triton.cdiv(M, block_m_down)
+    else:
+        num_down_tiles = triton.cdiv(M, block_m_down) * triton.cdiv(K, block_k_down)
     grid = (_grid_size(num_base_tiles, num_down_tiles, layout, base_chunk, down_chunk),)
 
     spatial_down_base_kernel[grid](
@@ -201,6 +260,8 @@ def spatial_down_base_matmul(
         BLOCK_K_DOWN=block_k_down,
         BLOCK_R_PAD=block_r_pad,
         INTERLEAVE=layout == "interleaved",
+        THREE_RANGE=layout == "three_range",
+        DOWN_FULL_K=down_full_k,
         BASE_CHUNK=base_chunk,
         DOWN_CHUNK=down_chunk,
     )
